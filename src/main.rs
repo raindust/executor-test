@@ -1,9 +1,9 @@
 use executor::{new_executor_and_spawner, Spawner};
-use futures::{executor::block_on, Future};
+use futures::{channel::oneshot, executor::block_on, Future};
 use msg_future::{MsgFuture, MsgState, SharedState};
 use std::{
     collections::HashMap,
-    sync::{mpsc::sync_channel, Arc, Mutex},
+    sync::{Arc, Mutex},
     task::Waker,
     time::Duration,
     vec,
@@ -59,9 +59,9 @@ async fn sync_handler(seq_number: u32, spawner: &Spawner, shared_state_map: &mut
     send_sync(seq_number, spawner, shared_state_map, print_msg);
 
     if seq_number % 2 == 1 {
-        send_sync(seq_number, spawner, shared_state_map, print_msg);
+        // send_sync(seq_number, spawner, shared_state_map, print_msg);
         // replace `send_sync` with `async_handler` will dead lock
-        // async_handler(seq_number, spawner, shared_state_map).await;
+        async_handler(seq_number, spawner, shared_state_map).await;
     }
 }
 
@@ -114,7 +114,7 @@ async fn send_async(
 ) -> Result<String, String> {
     let (future, state) = MsgFuture::new();
 
-    let (sender, receiver) = sync_channel(1);
+    let (sender, receiver) = oneshot::channel();
     let waker = spawner.spawn(seq_number, async move {
         let msg = future.await;
         wait_and_print().await;
@@ -124,7 +124,8 @@ async fn send_async(
     state.lock().unwrap().waker = Some(waker);
     add_state(seq_number, state, shared_state_map);
 
-    receiver.recv().map_err(|e| e.to_string())?
+    let msg = receiver.await.map_err(|e| e.to_string())?;
+    msg
 }
 
 async fn wait_and_print() {
